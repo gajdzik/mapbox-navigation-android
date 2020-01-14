@@ -8,8 +8,8 @@ class RouteStepProgressNavigation private constructor(
     private val step: LegStep? = null,
     private val stepPoints: List<Point>? = null,
     private val distanceRemaining: Float = 0f,
-    private val distanceTraveled: Double = 0.0,
-    private val fractionTraveled: Double = 0.0,
+    private val distanceTraveled: Float = 0f,
+    private val fractionTraveled: Float = 0f,
     private val durationRemaining: Long = 0L,
     private val builder: Builder
 ) {
@@ -50,7 +50,7 @@ class RouteStepProgressNavigation private constructor(
      * @return double value representing the distance the user has traveled so far along the current
      * step. Uses unit meters.
      */
-    fun distanceTraveled(): Double = distanceTraveled
+    fun distanceTraveled(): Float = distanceTraveled
 
     /**
      * Get the fraction traveled along the current step, this is a float value between 0 and 1 and
@@ -59,7 +59,7 @@ class RouteStepProgressNavigation private constructor(
      * @return a float value between 0 and 1 representing the fraction the user has traveled along
      * the current step.
      */
-    fun fractionTraveled(): Double = fractionTraveled
+    fun fractionTraveled(): Float = fractionTraveled
 
     /**
      * Provides the duration remaining in seconds till the user reaches the end of the current step.
@@ -75,8 +75,8 @@ class RouteStepProgressNavigation private constructor(
         private var step: LegStep? = null,
         private var stepPoints: List<Point>? = null,
         private var distanceRemaining: Float = 0f,
-        private var distanceTraveled: Double = 0.0,
-        private var fractionTraveled: Double = 0.0,
+        private var distanceTraveled: Float = 0f,
+        private var fractionTraveled: Float = 0f,
         private var durationRemaining: Long = 0L
     ) {
 
@@ -91,10 +91,10 @@ class RouteStepProgressNavigation private constructor(
         fun distanceRemaining(distanceRemaining: Float) =
             apply { this.distanceRemaining = distanceRemaining }
 
-        fun distanceTraveled(distanceTraveled: Double) =
+        fun distanceTraveled(distanceTraveled: Float) =
             apply { this.distanceTraveled = distanceTraveled }
 
-        fun fractionTraveled(fractionTraveled: Double) =
+        fun fractionTraveled(fractionTraveled: Float) =
             apply { this.fractionTraveled = fractionTraveled }
 
         fun durationRemaining(durationRemaining: Long) =

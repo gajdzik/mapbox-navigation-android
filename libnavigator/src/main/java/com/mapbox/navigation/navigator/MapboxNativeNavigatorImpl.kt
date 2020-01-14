@@ -12,6 +12,7 @@ import com.mapbox.navigation.base.trip.model.RouteProgressNavigation
 import com.mapbox.navigation.base.trip.model.RouteStepProgressNavigation
 import com.mapbox.navigator.*
 import java.util.*
+import kotlin.math.roundToLong
 
 object MapboxNativeNavigatorImpl : MapboxNativeNavigator {
 
@@ -137,7 +138,13 @@ object MapboxNativeNavigatorImpl : MapboxNativeNavigator {
                 var currentLeg: RouteLeg? = null
                 if (legIndex < legs.size) {
                     currentLeg = legs[legIndex]
+                    legProgressBuilder.legIndex(legIndex)
                     legProgressBuilder.routeLeg(currentLeg)
+
+                    // todo mapbox java issue - leg distance is nullable
+                    val distanceTraveled = (currentLeg.distance()?.toFloat() ?: 0f) - remainingLegDistance
+                    legProgressBuilder.distanceTraveled(distanceTraveled)
+                    legProgressBuilder.fractionTraveled(distanceTraveled / (currentLeg.distance()?.toFloat() ?: 0f))
                 }
 
                 ifNonNull(currentLeg?.steps()) { steps ->
@@ -153,13 +160,14 @@ object MapboxNativeNavigatorImpl : MapboxNativeNavigator {
                             stepProgressBuilder.stepPoints(PolylineUtils.decode(stepGeometry, /* todo add core dependency PRECISION_6*/6))
                         }
 
-                        val distanceTraveled = currentStep.distance() - remainingStepDistance
+                        val distanceTraveled = currentStep.distance().toFloat() - remainingStepDistance
                         stepProgressBuilder.distanceTraveled(distanceTraveled)
-                        stepProgressBuilder.fractionTraveled(distanceTraveled / currentStep.distance())
+                        stepProgressBuilder.fractionTraveled(distanceTraveled / currentStep.distance().toFloat())
                     }
 
                     if (upcomingStepIndex < steps.size) {
                         val upcomingStep = steps[upcomingStepIndex]
+                        legProgressBuilder.upcomingStep(upcomingStep)
 
                         val stepGeometry = upcomingStep.geometry()
                         stepGeometry?.let {
@@ -171,7 +179,11 @@ object MapboxNativeNavigatorImpl : MapboxNativeNavigator {
         }
 
         stepProgressBuilder.distanceRemaining(remainingStepDistance)
-        stepProgressBuilder.durationRemaining(remainingStepDuration)
+        stepProgressBuilder.durationRemaining((remainingStepDuration / ONE_SECOND_IN_MILLISECONDS).roundToLong())
+
+        legProgressBuilder.currentStepProgress(stepProgressBuilder.build())
+        legProgressBuilder.distanceRemaining(remainingLegDistance)
+        legProgressBuilder.durationRemaining((remainingLegDuration / ONE_SECOND_IN_MILLISECONDS).roundToLong())
 
         return routeProgressBuilder.build()
     }

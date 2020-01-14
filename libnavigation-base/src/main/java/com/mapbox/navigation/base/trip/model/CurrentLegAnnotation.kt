@@ -11,6 +11,7 @@ import java.io.Serializable
  * The Mapbox Directions API gives a list of annotations, each item in the list representing an
  * annotation between two points along the leg.
  */
+// todo check if even used
 data class CurrentLegAnnotation(
     val index: Int,
     val distanceToAnnotation: Double,
