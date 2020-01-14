@@ -1,22 +1,22 @@
 package com.mapbox.navigation.navigator
 
 import android.location.Location
+import com.mapbox.api.directions.v5.models.DirectionsRoute
+import com.mapbox.api.directions.v5.models.LegStep
+import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.geojson.Point
-import com.mapbox.navigation.base.trip.model.RouteProgress
-import com.mapbox.navigator.BannerInstruction
-import com.mapbox.navigator.FixLocation
-import com.mapbox.navigator.HttpInterface
-import com.mapbox.navigator.NavigationStatus
-import com.mapbox.navigator.Navigator
-import com.mapbox.navigator.NavigatorConfig
-import com.mapbox.navigator.RouterParams
-import com.mapbox.navigator.RouterResult
-import com.mapbox.navigator.VoiceInstruction
-import java.util.Date
+import com.mapbox.geojson.utils.PolylineUtils
+import com.mapbox.navigation.base.extensions.ifNonNull
+import com.mapbox.navigation.base.trip.model.RouteLegProgressNavigation
+import com.mapbox.navigation.base.trip.model.RouteProgressNavigation
+import com.mapbox.navigation.base.trip.model.RouteStepProgressNavigation
+import com.mapbox.navigator.*
+import java.util.*
 
 object MapboxNativeNavigatorImpl : MapboxNativeNavigator {
 
     private val navigator: Navigator = Navigator()
+    private var route: DirectionsRoute? = null
 
     init {
         System.loadLibrary("navigator-android")
@@ -37,8 +37,10 @@ object MapboxNativeNavigatorImpl : MapboxNativeNavigator {
 
     // Routing
 
-    override fun setRoute(routeJson: String, routeIndex: Int, legIndex: Int): NavigationStatus =
-        navigator.setRoute(routeJson, routeIndex, legIndex)
+    override fun setRoute(route: DirectionsRoute, routeIndex: Int, legIndex: Int): NavigationStatus {
+        this.route = route
+        return navigator.setRoute(route.toJson(), routeIndex, legIndex)
+    }
 
     override fun updateAnnotations(
         legAnnotationJson: String,
@@ -118,7 +120,167 @@ object MapboxNativeNavigatorImpl : MapboxNativeNavigator {
         it.accuracy = this.accuracyHorizontal ?: 0f
     }
 
-    private fun NavigationStatus.getRouteProgress(): RouteProgress {
-        return RouteProgress("")
+    private val ONE_INDEX = 1
+    private val ONE_SECOND_IN_MILLISECONDS = 1000.0
+    private val FIRST_BANNER_INSTRUCTION = 0
+
+    private fun NavigationStatus.getRouteProgress(): RouteProgressNavigation {
+        val upcomingStepIndex = stepIndex + ONE_INDEX
+
+        val routeProgressBuilder = RouteProgressNavigation.Builder()
+        val legProgressBuilder = RouteLegProgressNavigation.Builder()
+        val stepProgressBuilder = RouteStepProgressNavigation.Builder()
+
+        ifNonNull(route) { route ->
+            ifNonNull(route.legs()) { legs ->
+
+                var currentLeg: RouteLeg? = null
+                if (legIndex < legs.size) {
+                    currentLeg = legs[legIndex]
+                    legProgressBuilder.routeLeg(currentLeg)
+                }
+
+                ifNonNull(currentLeg?.steps()) { steps ->
+                    val currentStep: LegStep?
+                    if (stepIndex < steps.size) {
+                        currentStep = steps[stepIndex]
+                        stepProgressBuilder.stepIndex(stepIndex)
+                        stepProgressBuilder.step(currentStep)
+
+                        currentStep?.distance()
+                        val stepGeometry = currentStep.geometry()
+                        stepGeometry?.let {
+                            stepProgressBuilder.stepPoints(PolylineUtils.decode(stepGeometry, /* todo add core dependency PRECISION_6*/6))
+                        }
+
+                        val distanceTraveled = currentStep.distance() - remainingStepDistance
+                        stepProgressBuilder.distanceTraveled(distanceTraveled)
+                        stepProgressBuilder.fractionTraveled(distanceTraveled / currentStep.distance())
+                    }
+
+                    if (upcomingStepIndex < steps.size) {
+                        val upcomingStep = steps[upcomingStepIndex]
+
+                        val stepGeometry = upcomingStep.geometry()
+                        stepGeometry?.let {
+                            routeProgressBuilder.upcomingStepPoints(PolylineUtils.decode(stepGeometry, /* todo add core dependency PRECISION_6*/6))
+                        }
+                    }
+                }
+            }
+        }
+
+        stepProgressBuilder.distanceRemaining(remainingStepDistance)
+        stepProgressBuilder.durationRemaining(remainingStepDuration)
+
+        return routeProgressBuilder.build()
+    }
+
+    private fun buildRouteProgressFrom(
+        status: NavigationStatus,
+        navigator: MapboxNavigator
+    ): RouteProgress? {
+
+        return ifNonNull(route) { route ->
+            updateSteps(route, legIndex, stepIndex)
+            updateStepPoints(route, legIndex, stepIndex, upcomingStepIndex)
+
+            val legDistanceRemaining = status.remainingLegDistance.toDouble()
+            val routeDistanceRemaining = NavigationHelper.routeDistanceRemaining(
+                legDistanceRemaining,
+                legIndex, route
+            )
+            val stepDistanceRemaining = status.remainingStepDistance.toDouble()
+            val legDurationRemaining = status.remainingLegDuration / ONE_SECOND_IN_MILLISECONDS
+
+            currentLegAnnotation = ifNonNull(currentLeg) { currentLeg ->
+                NavigationHelper.createCurrentAnnotation(
+                    currentLegAnnotation,
+                    currentLeg, legDistanceRemaining
+                )
+            }
+            val routeState = status.routeState
+            val currentRouteState = progressStateMap[routeState]
+
+            val progressBuilder = RouteProgress.Builder()
+                .distanceRemaining(routeDistanceRemaining)
+                .legDistanceRemaining(legDistanceRemaining)
+                .legDurationRemaining(legDurationRemaining)
+                .stepDistanceRemaining(stepDistanceRemaining)
+                .directionsRoute(route)
+                .currentStep(currentStep)
+                .currentStepPoints(currentStepPoints)
+                .upcomingStepPoints(upcomingStepPoints)
+                .stepIndex(stepIndex)
+                .legIndex(legIndex)
+                .inTunnel(status.inTunnel)
+                .currentState(currentRouteState)
+
+            addRouteGeometries(progressBuilder)
+            addVoiceInstructions(status, progressBuilder)
+            addBannerInstructions(status, navigator, progressBuilder)
+            addUpcomingStepPoints(progressBuilder)
+            progressBuilder.build()
+        }
+    }
+
+    private fun updateSteps(route: DirectionsRoute, legIndex: Int, stepIndex: Int) {
+        ifNonNull(route.legs()) { legs ->
+            if (legIndex < legs.size) {
+                currentLeg = legs[legIndex]
+            }
+            ifNonNull(currentLeg?.steps()) { steps ->
+                if (stepIndex < steps.size) {
+                    currentStep = steps[stepIndex]
+                }
+            }
+        }
+    }
+
+    private fun updateStepPoints(
+        route: DirectionsRoute,
+        legIndex: Int,
+        stepIndex: Int,
+        upcomingStepIndex: Int
+    ) {
+        currentStepPoints = NavigationHelper.decodeStepPoints(
+            route, currentStepPoints,
+            legIndex, stepIndex
+        )
+        upcomingStepPoints = NavigationHelper.decodeStepPoints(
+            route, null,
+            legIndex, upcomingStepIndex
+        )
+    }
+
+    private fun addUpcomingStepPoints(progressBuilder: RouteProgress.Builder) {
+        ifNonNull(upcomingStepPoints) { upcomingStepPoints ->
+            if (upcomingStepPoints.isNotEmpty())
+                progressBuilder.upcomingStepPoints(upcomingStepPoints)
+        }
+    }
+
+    private fun addRouteGeometries(progressBuilder: RouteProgress.Builder) {
+        progressBuilder.routeGeometryWithBuffer(routeGeometryWithBuffer)
+    }
+
+    private fun addVoiceInstructions(
+        status: NavigationStatus,
+        progressBuilder: RouteProgress.Builder
+    ) {
+        val voiceInstruction = status.voiceInstruction
+        progressBuilder.voiceInstruction(voiceInstruction)
+    }
+
+    private fun addBannerInstructions(
+        status: NavigationStatus,
+        navigator: MapboxNavigator,
+        progressBuilder: RouteProgress.Builder
+    ) {
+        var bannerInstruction = status.bannerInstruction
+        if (status.routeState == RouteState.INITIALIZED) {
+            bannerInstruction = navigator.retrieveBannerInstruction(FIRST_BANNER_INSTRUCTION)
+        }
+        progressBuilder.bannerInstruction(bannerInstruction)
     }
 }
