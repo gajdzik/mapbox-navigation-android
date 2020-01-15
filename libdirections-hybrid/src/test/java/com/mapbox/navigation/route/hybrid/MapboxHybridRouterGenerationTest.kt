@@ -17,14 +17,14 @@ class MapboxHybridRouterGenerationTest {
 
     private val onboardRouter: MapboxOnboardRouter = mockk()
     private val offboardRouter: MapboxOffboardRouter = mockk(relaxed = true)
-    private val context:Context = mockk()
-    private val connectivityManager:ConnectivityManager = mockk()
+    private val context: Context = mockk()
+    private val connectivityManager: ConnectivityManager = mockk()
     private val intent: Intent = mockk()
 
     @Before
     fun setUp() {
         every { context.getSystemService(Context.CONNECTIVITY_SERVICE) } answers { connectivityManager }
-        every { context.registerReceiver(any(), any()) } answers {intent}
+        every { context.registerReceiver(any(), any()) } answers { intent }
         hybridRouter = MapboxHybridRouter(onboardRouter, offboardRouter, context)
     }
 
